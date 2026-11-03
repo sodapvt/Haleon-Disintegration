@@ -20,6 +20,9 @@ public class VideoPlayerDisplay : MonoBehaviour
     [Tooltip("Hold the first video frame so static objects can be aligned with the video.")]
     [SerializeField] private bool pauseOnFirstFrame;
 
+    [Tooltip("On WebGL phones, show the browser-owned fullscreen prompt when this video starts.")]
+    [SerializeField] private bool requestFullscreenForWebGL = true;
+
     public event Action FirstFrameDisplayed;
     public event Action PlaybackFailed;
     public bool HasVisibleFrame { get; private set; }
@@ -118,6 +121,11 @@ public class VideoPlayerDisplay : MonoBehaviour
         if (waitingForFirstFrame || (HasVisibleFrame && (videoPlayer.isPlaying || previewingFirstFrame)))
         {
             return;
+        }
+
+        if (requestFullscreenForWebGL)
+        {
+            WebGLPresentation.ShowVideoFullscreenPrompt();
         }
 
         if (pauseOnFirstFrame)

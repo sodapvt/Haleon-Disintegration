@@ -1,86 +1,186 @@
-using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Serialization;
+using UnityEngine.UI;
+using System;
 
 public class HCPUIController : MonoBehaviour
 {
     [FormerlySerializedAs("mrCodeInput")]
-    public TMP_InputField employeeCodeInput;
-
-    [FormerlySerializedAs("mrName")]
-    public TextMeshProUGUI employeeName;
+    [FormerlySerializedAs("employeeCodeInput")]
+    public TMP_InputField eseNameInput;
 
     public TextMeshProUGUI date;
-    public TextMeshProUGUI time;
+    [SerializeField] private TMP_InputField hqInput;
+    [SerializeField] private TMP_InputField emailInput;
+    [SerializeField] private TMP_Dropdown regionDropdown;
 
-    [FormerlySerializedAs("HQ")]
-    public TextMeshProUGUI hqText;
+    public TMP_InputField EseNameInput => eseNameInput;
+    public TMP_InputField HqInput => hqInput;
+    public TMP_InputField EmailInput => emailInput;
+    public TMP_Dropdown RegionDropdown => regionDropdown;
 
-    [FormerlySerializedAs("Zone")]
-    public TextMeshProUGUI zoneText;
-
-    public CSVReader csvReader;
-    public bool dataFound = false;
-    public HCPRecord SelectedRecord { get; private set; }
-
-    private bool hasSearched = false;
-
-    private void Update()
+    private static readonly string[] Regions =
     {
-        if (employeeCodeInput.text.Length >= 8 && !hasSearched)
-        {
-            hasSearched = true;
-            OnSearchClicked();
-        }
-        else if (employeeCodeInput.text.Length < 8)
-        {
-            hasSearched = false;
-            ResetForm();
-        }
+        "North", "Central", "East", "South 1", "South 2", "West 1", "West 2"
+    };
+
+    private void Awake()
+    {
+        // The scene already supplies the ESE field. The other three visual slots are
+        // converted to controls here so the existing form artwork and layout are kept.
+        ConfigureExistingInput(eseNameInput, "ESE Name", TMP_InputField.ContentType.Standard);
+        if (hqInput == null)
+            hqInput = CreateInputInSlot("HQ", "HQ", TMP_InputField.ContentType.Standard);
+        if (emailInput == null)
+            emailInput = CreateInputInSlot("Email Id", "Email ID", TMP_InputField.ContentType.EmailAddress);
+        if (regionDropdown == null)
+            regionDropdown = CreateRegionDropdown();
+        RefreshDate();
+        WebGLFormInput.Attach(this);
     }
 
-    private void ResetForm()
+    private void Update() => RefreshDate();
+
+    public bool TryCreateRecord(out HCPRecord record, out string validationMessage)
     {
-        dataFound = false;
-        SelectedRecord = null;
-        employeeName.text = "Name: ";
-        hqText.text = "HQ: ";
-        zoneText.text = "Zone: ";
+        record = null;
+        validationMessage = string.Empty;
+
+        string eseName = Read(eseNameInput);
+        string hq = Read(hqInput);
+        string email = Read(emailInput);
+        string region = regionDropdown == null ? string.Empty : regionDropdown.options[regionDropdown.value].text;
+
+        if (string.IsNullOrWhiteSpace(eseName) || string.IsNullOrWhiteSpace(hq) ||
+            string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(region))
+        {
+            validationMessage = "Please complete all fields.";
+            return false;
+        }
+
+        if (!email.Contains("@") || !email.Contains("."))
+        {
+            validationMessage = "Please enter a valid email address.";
+            return false;
+        }
+
+        record = new HCPRecord(eseName, hq, email, region, DateTime.Now.ToString("yyyy-MM-dd"));
+        return true;
     }
 
-    public void OnSearchClicked()
+    private void RefreshDate()
     {
-        if (!csvReader.isDataLoaded)
+        if (date != null)
+            date.text = DateTime.Now.ToString("yyyy-MM-dd");
+    }
+
+    private TMP_InputField CreateInputInSlot(string slotName, string placeholder, TMP_InputField.ContentType contentType)
+    {
+        GameObject slot = GameObject.Find(slotName);
+        if (slot == null)
         {
-            Debug.Log("Data is still loading, please wait...");
-            return;
+            Debug.LogError($"Form slot '{slotName}' was not found.", this);
+            return null;
         }
 
-        string enteredEmployeeCode = employeeCodeInput.text.Trim();
-        if (string.IsNullOrEmpty(enteredEmployeeCode))
+        TMP_InputField input = slot.GetComponent<TMP_InputField>();
+        if (input == null)
+            input = slot.AddComponent<TMP_InputField>();
+
+        TextMeshProUGUI label = slot.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (label == null)
         {
-            ResetForm();
-            Debug.Log("Please enter an Employee Code.");
-            return;
+            Debug.LogError($"Form slot '{slotName}' has no text label.", this);
+            return input;
         }
 
-        List<HCPRecord> filtered =
-            csvReader.GetRecordsByEmployeeCode(enteredEmployeeCode);
+        GameObject valueObject = new GameObject("Input Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        valueObject.transform.SetParent(slot.transform, false);
+        TextMeshProUGUI value = valueObject.GetComponent<TextMeshProUGUI>();
+        value.font = label.font;
+        value.fontSize = label.fontSize;
+        value.color = label.color;
+        value.alignment = label.alignment;
+        value.enableWordWrapping = false;
+        Stretch(value.rectTransform);
 
-        if (filtered.Count == 0)
-        {
-            ResetForm();
-            Debug.Log($"No record found for Employee Code: {enteredEmployeeCode}");
+        label.text = placeholder;
+        label.fontStyle = FontStyles.Italic;
+        Color placeholderColor = label.color;
+        placeholderColor.a = 0.55f;
+        label.color = placeholderColor;
+
+        input.targetGraphic = slot.GetComponent<Image>();
+        input.textComponent = value;
+        input.placeholder = label;
+        input.textViewport = value.rectTransform;
+        input.contentType = contentType;
+        input.lineType = TMP_InputField.LineType.SingleLine;
+        return input;
+    }
+
+    private void ConfigureExistingInput(TMP_InputField input, string placeholder, TMP_InputField.ContentType contentType)
+    {
+        if (input == null)
             return;
+
+        input.contentType = contentType;
+        if (input.placeholder is TextMeshProUGUI placeholderText)
+            placeholderText.text = placeholder;
+    }
+
+    private TMP_Dropdown CreateRegionDropdown()
+    {
+        GameObject slot = GameObject.Find("Region");
+        if (slot == null)
+        {
+            Debug.LogError("Form slot 'Region' was not found.", this);
+            return null;
         }
 
-        SelectedRecord = filtered[0];
-        employeeName.text = "Name: " + SelectedRecord.name;
-        hqText.text = "HQ: " + SelectedRecord.hq;
-        zoneText.text = "Zone: " + SelectedRecord.zone;
-        dataFound = true;
+        TextMeshProUGUI oldLabel = slot.GetComponentInChildren<TextMeshProUGUI>(true);
+        if (oldLabel != null)
+            oldLabel.gameObject.SetActive(false);
 
-        Debug.Log($"Employee found: {SelectedRecord.employeeCode}");
+        GameObject dropdownObject = TMP_DefaultControls.CreateDropdown(new TMP_DefaultControls.Resources());
+        dropdownObject.name = "Region Dropdown";
+        dropdownObject.transform.SetParent(slot.transform, false);
+        Stretch(dropdownObject.GetComponent<RectTransform>());
+
+        TMP_Dropdown dropdown = dropdownObject.GetComponent<TMP_Dropdown>();
+        dropdown.targetGraphic = dropdownObject.GetComponent<Image>();
+        dropdown.options.Clear();
+        foreach (string region in Regions)
+            dropdown.options.Add(new TMP_Dropdown.OptionData(region));
+        dropdown.value = 0;
+        dropdown.RefreshShownValue();
+
+        if (dropdown.captionText != null)
+        {
+            dropdown.captionText.fontSize = 30;
+            dropdown.captionText.alignment = TextAlignmentOptions.Left;
+        }
+        return dropdown;
+    }
+
+    private static void Stretch(RectTransform rect)
+    {
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = new Vector2(18f, 8f);
+        rect.offsetMax = new Vector2(-18f, -8f);
+    }
+
+    private static string Read(TMP_InputField input) => input == null ? string.Empty : input.text.Trim();
+
+    public void ConfigureSceneControls(
+        TMP_InputField hq,
+        TMP_InputField email,
+        TMP_Dropdown region)
+    {
+        hqInput = hq;
+        emailInput = email;
+        regionDropdown = region;
     }
 }

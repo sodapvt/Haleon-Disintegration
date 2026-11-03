@@ -631,7 +631,7 @@ MonoBehaviour:
   displayRoot: {fileID: 1524375912}
   videoImage: {fileID: 527070447}
   aspectRatioFitter: {fileID: 527070444}
-  webVideoFileName: clip_last_NEW.mp4
+  webVideoFileName: cliplast_new.mp4
   moveToNextSlideOnFinish: 0
   videoEdgeCropPixels: {x: 10, y: 10}
   pauseOnFirstFrame: 0

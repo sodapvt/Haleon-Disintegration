@@ -8,19 +8,10 @@ using System;
 
 public class GoogleSheetUploader : MonoBehaviour
 {
-    [Serializable]
-    private class DoctorNameUpdate
-    {
-        public string action = "updateDoctorName";
-        public string submissionId;
-        public string doctorName;
-    }
-
      [SerializeField] private string googleSheetURL = "YOUR_SHEET_URL_HERE";
     [SerializeField] private string googleFormURL = "YOUR_WEB_APP_URL_HERE";
     private Queue<HCPRecord> retryQueue = new Queue<HCPRecord>();
     private bool isUploading = false;
-    private bool isDoctorNameUpdateRunning;
     private string currentSubmissionId = string.Empty;
     public static GoogleSheetUploader instance;
     void Awake()
@@ -42,35 +33,37 @@ public class GoogleSheetUploader : MonoBehaviour
     {
         FormHandler.instance.audioSource.Play();
         FormHandler.instance.androidHaptics.Vibrate();
-        Debug.Log("Submit button clicked. " + FormHandler.instance.hcpUIController.dataFound);
         HCPUIController form = FormHandler.instance.hcpUIController;
-        if (!form.dataFound || form.SelectedRecord == null)
+        if (form == null)
         {
-            AndroidToaster.ShowToast("Please fill in all required fields.");
+            AndroidToaster.ShowToast("The form is not available.");
             return;
         }
 
-        HCPRecord selectedRecord = form.SelectedRecord;
+        if (!form.TryCreateRecord(out HCPRecord data, out string validationMessage))
+        {
+            AndroidToaster.ShowToast(string.IsNullOrEmpty(validationMessage)
+                ? "Please complete all required fields."
+                : validationMessage);
+            return;
+        }
 
-        // Pass the form without sending any data to Google Sheets.
-        if (selectedRecord.employeeCode == "00000000")
+        // This call is made directly from the Submit button's click event,
+        // which is the moment browsers permit a WebGL page to enter fullscreen.
+        WebGLPresentation.EnterFullscreenFromUserGesture();
+
+        // Test entries are allowed to continue through the app without sending any
+        // personal data to the Google Sheet. Comparison is case-insensitive so the
+        // operator can enter "test user" naturally.
+        if (string.Equals(data.eseName, "Test User", StringComparison.OrdinalIgnoreCase))
         {
             currentSubmissionId = string.Empty;
-            Debug.Log("No-upload test code accepted. Skipping Google Sheet upload.");
             AndroidToaster.ShowToast("Test form accepted. Upload skipped.");
             LoadGameScene();
             return;
         }
 
-        // Upload only Employee Code, Name, H.Q. and Zone.
-        // MGR LINE is intentionally omitted.
-        HCPRecord data = new HCPRecord(
-            selectedRecord.employeeCode,
-            selectedRecord.name,
-            selectedRecord.hq,
-            selectedRecord.zone,
-            Guid.NewGuid().ToString("N")
-        );
+        data.submissionId = Guid.NewGuid().ToString("N");
         currentSubmissionId = data.submissionId;
 
         AndroidToaster.ShowToast("Data saved. Uploading...");
@@ -156,74 +149,6 @@ public class GoogleSheetUploader : MonoBehaviour
             FormHandler.instance.date.text = System.DateTime.Now.ToString("yyyy-MM-dd");
         if (FormHandler.instance.time != null)
             FormHandler.instance.time.text = System.DateTime.Now.ToString("HH:mm:ss");
-    }
-
-    public void UpdateDoctorName(string doctorName)
-    {
-        string cleanedName = (doctorName ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(cleanedName) ||
-            string.IsNullOrWhiteSpace(currentSubmissionId))
-        {
-            Debug.LogWarning(
-                "Doctor name update skipped: no doctor name or submission ID.");
-            return;
-        }
-
-        if (isDoctorNameUpdateRunning)
-            return;
-
-        StartCoroutine(PostDoctorNameWhenReady(cleanedName));
-    }
-
-    private IEnumerator PostDoctorNameWhenReady(string doctorName)
-    {
-        isDoctorNameUpdateRunning = true;
-
-        // The create request must finish before its row can be updated.
-        while (isUploading || retryQueue.Count > 0)
-            yield return new WaitForSeconds(1f);
-
-        DoctorNameUpdate update = new DoctorNameUpdate
-        {
-            submissionId = currentSubmissionId,
-            doctorName = doctorName
-        };
-
-        while (Application.internetReachability == NetworkReachability.NotReachable)
-            yield return new WaitForSeconds(5f);
-
-        string jsonData = JsonUtility.ToJson(update);
-        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
-
-        using (UnityWebRequest request = new UnityWebRequest(googleFormURL, "POST"))
-        {
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = 10;
-            yield return request.SendWebRequest();
-
-            bool serverAccepted = request.result == UnityWebRequest.Result.Success &&
-                                  request.downloadHandler.text.Contains("\"ok\":true");
-            if (serverAccepted)
-            {
-                Debug.Log("Doctor name added to the Google Sheet row.");
-            }
-            else
-            {
-                Debug.LogWarning(
-                    "Doctor name update failed: " +
-                    (string.IsNullOrWhiteSpace(request.error)
-                        ? request.downloadHandler.text
-                        : request.error));
-                isDoctorNameUpdateRunning = false;
-                yield return new WaitForSeconds(5f);
-                UpdateDoctorName(doctorName);
-                yield break;
-            }
-        }
-
-        isDoctorNameUpdateRunning = false;
     }
 
     private void TryUploadNext()

@@ -3,26 +3,26 @@ public class HCPRecord
 {
     public string action;
     public string submissionId;
-    public string employeeCode;
-    public string name;
+    public string eseName;
     public string hq;
-    public string zone;
-    public string doctorName;
+    public string email;
+    public string region;
+    public string date;
 
     public HCPRecord(
-        string employeeCode,
-        string name,
+        string eseName,
         string hq,
-        string zone,
-        string submissionId = "",
-        string doctorName = "")
+        string email,
+        string region,
+        string date,
+        string submissionId = "")
     {
         this.action = "create";
         this.submissionId = submissionId;
-        this.employeeCode = employeeCode;
-        this.name = name;
+        this.eseName = eseName;
         this.hq = hq;
-        this.zone = zone;
-        this.doctorName = doctorName;
+        this.email = email;
+        this.region = region;
+        this.date = date;
     }
 }

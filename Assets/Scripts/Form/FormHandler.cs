@@ -18,7 +18,7 @@ public class FormHandler : MonoBehaviour
     public AudioSource audioSource;
     public Button submitButton;
     public AndroidHaptics androidHaptics;
-    [SerializeField] private bool skipFormEntry = true;
+    [SerializeField] private bool skipFormEntry = false;
     public bool SkipFormEntry => skipFormEntry;
     //
     void Awake()
