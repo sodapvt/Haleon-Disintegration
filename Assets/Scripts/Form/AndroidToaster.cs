@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Runtime.InteropServices;
 
 public class AndroidToaster
 {
@@ -20,6 +21,14 @@ public class AndroidToaster
             );
             toast.Call("show");
         }));
+    }
+#elif UNITY_WEBGL && !UNITY_EDITOR
+    [DllImport("__Internal")]
+    private static extern void HALEON_ShowToast(string message, int duration);
+
+    public static void ShowToast(string message, bool longDuration = false)
+    {
+        HALEON_ShowToast(message, longDuration ? 6000 : 4000);
     }
 #else
     public static void ShowToast(string message, bool longDuration = false)

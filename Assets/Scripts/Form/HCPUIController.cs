@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using UnityEngine.UI;
 using System;
+using System.Net.Mail;
 
 public class HCPUIController : MonoBehaviour
 {
@@ -50,16 +51,31 @@ public class HCPUIController : MonoBehaviour
         string eseName = Read(eseNameInput);
         string hq = Read(hqInput);
         string email = Read(emailInput);
-        string region = regionDropdown == null ? string.Empty : regionDropdown.options[regionDropdown.value].text;
+        string region = regionDropdown == null || regionDropdown.value < 0 || regionDropdown.value >= regionDropdown.options.Count
+            ? string.Empty : regionDropdown.options[regionDropdown.value].text;
 
-        if (string.IsNullOrWhiteSpace(eseName) || string.IsNullOrWhiteSpace(hq) ||
-            string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(region))
+        if (string.IsNullOrWhiteSpace(eseName))
         {
-            validationMessage = "Please complete all fields.";
+            validationMessage = "Please enter your ESE name.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(hq))
+        {
+            validationMessage = "Please enter your HQ.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            validationMessage = "Please enter your email address.";
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(region))
+        {
+            validationMessage = "Please select a region.";
             return false;
         }
 
-        if (!email.Contains("@") || !email.Contains("."))
+        if (!IsValidEmail(email))
         {
             validationMessage = "Please enter a valid email address.";
             return false;
@@ -73,6 +89,26 @@ public class HCPUIController : MonoBehaviour
     {
         if (date != null)
             date.text = DateTime.Now.ToString("yyyy-MM-dd");
+    }
+
+    private static bool IsValidEmail(string email)
+    {
+        foreach (char character in email)
+            if (char.IsWhiteSpace(character)) return false;
+
+        try
+        {
+            var address = new MailAddress(email);
+            return string.Equals(address.Address, email, StringComparison.OrdinalIgnoreCase) &&
+                address.Host.Contains(".") && !address.Host.StartsWith(".") &&
+                !address.Host.EndsWith(".") && !address.Host.Contains("..") &&
+                !address.User.StartsWith(".") && !address.User.EndsWith(".") &&
+                !address.User.Contains("..");
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private TMP_InputField CreateInputInSlot(string slotName, string placeholder, TMP_InputField.ContentType contentType)

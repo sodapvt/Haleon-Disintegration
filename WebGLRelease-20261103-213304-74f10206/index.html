@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes">
+    <title>HALEON</title>
+    <link rel="stylesheet" href="TemplateData/style.css">
+  </head>
+  <body>
+    <div id="unity-container" class="unity-desktop">
+      <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
+      <div id="unity-loading-bar"><div id="unity-progress-bar-empty"><div id="unity-progress-bar-full"></div></div></div>
+      <div id="unity-warning"></div>
+    </div>
+
+    <div id="rotate-device" class="presentation-overlay" aria-live="polite">
+      <div class="presentation-card"><div class="rotate-icon">↻</div><h1>Rotate your device</h1><p>This experience is designed for landscape viewing.</p></div>
+    </div>
+    <div id="video-fullscreen" class="presentation-overlay" aria-live="polite" hidden>
+      <div class="presentation-card"><h1>Watch in fullscreen</h1><p>Rotate to landscape for the best video experience.</p><button id="enter-fullscreen" type="button">Enter fullscreen</button><button id="continue-windowed" class="secondary" type="button">Continue</button></div>
+    </div>
+    <div id="resume-fullscreen" class="presentation-overlay" role="dialog" aria-modal="true" aria-labelledby="resume-fullscreen-title" hidden>
+      <div class="presentation-card"><h1 id="resume-fullscreen-title">Welcome back</h1><p id="resume-fullscreen-message">Tap below to return to full-screen mode and continue.</p><button id="restore-fullscreen" type="button">Return to full-screen</button><button id="resume-windowed" class="secondary" type="button">Continue in browser</button></div>
+    </div>
+
+    <script>
+      const container = document.querySelector("#unity-container");
+      const canvas = document.querySelector("#unity-canvas");
+      const loadingBar = document.querySelector("#unity-loading-bar");
+      const progressBarFull = document.querySelector("#unity-progress-bar-full");
+      const warningBanner = document.querySelector("#unity-warning");
+      const videoFullscreenPrompt = document.querySelector("#video-fullscreen");
+      const resumeFullscreenPrompt = document.querySelector("#resume-fullscreen");
+      const resumeFullscreenMessage = document.querySelector("#resume-fullscreen-message");
+      let hasEnteredFullscreen = false;
+      let resumePromptDismissed = false;
+
+      function isPresentationFullscreen() {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement);
+      }
+
+      function updateFullscreenResumePrompt() {
+        if (isPresentationFullscreen()) {
+          hasEnteredFullscreen = true;
+          resumePromptDismissed = false;
+          resumeFullscreenPrompt.hidden = true;
+        } else if (hasEnteredFullscreen && !document.hidden && !resumePromptDismissed && resumeFullscreenPrompt.hidden) {
+          // Dismiss the keyboard and publish any pending form edit before showing
+          // the browser-owned button. No scene reload or form reset is needed.
+          if (document.activeElement && document.activeElement.tagName === "INPUT") document.activeElement.blur();
+          resumeFullscreenMessage.textContent = "Tap below to return to full-screen mode and continue.";
+          videoFullscreenPrompt.hidden = true;
+          resumeFullscreenPrompt.hidden = false;
+          document.querySelector("#restore-fullscreen").focus();
+        }
+      }
+
+      document.addEventListener("fullscreenchange", updateFullscreenResumePrompt);
+      document.addEventListener("webkitfullscreenchange", updateFullscreenResumePrompt);
+      document.addEventListener("visibilitychange", () => {
+        if (document.hidden) resumePromptDismissed = false;
+        else updateFullscreenResumePrompt();
+      });
+      window.addEventListener("focus", updateFullscreenResumePrompt);
+      window.addEventListener("pageshow", updateFullscreenResumePrompt);
+
+      function unityShowBanner(message, type) {
+        const item = document.createElement("div");
+        item.textContent = message;
+        item.className = type || "warning";
+        warningBanner.appendChild(item);
+        setTimeout(() => item.remove(), 5000);
+      }
+
+      async function enterPresentationFullscreen() {
+        try {
+          // Include browser form fields and presentation overlays in fullscreen.
+          const fullscreenRoot = document.documentElement;
+          const requestFullscreen = fullscreenRoot.requestFullscreen || fullscreenRoot.webkitRequestFullscreen;
+          if (!isPresentationFullscreen() && requestFullscreen) {
+            await requestFullscreen.call(fullscreenRoot);
+          }
+          if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape");
+        } catch (_) {
+          // iOS and some browsers do not permit orientation locking. The rotate prompt remains available.
+        }
+        videoFullscreenPrompt.hidden = true;
+        updateFullscreenResumePrompt();
+        if (!isPresentationFullscreen() && !resumeFullscreenPrompt.hidden) {
+          resumeFullscreenMessage.textContent = "Full-screen could not be restored. Try again or continue in your browser.";
+        }
+      }
+
+      window.HALEON_ShowVideoFullscreenPrompt = function () {
+        if (!window.matchMedia("(max-width: 900px)").matches || isPresentationFullscreen() || !resumeFullscreenPrompt.hidden) return;
+        videoFullscreenPrompt.hidden = false;
+      };
+      window.HALEON_EnterPresentationFullscreen = enterPresentationFullscreen;
+
+      document.querySelector("#enter-fullscreen").addEventListener("click", enterPresentationFullscreen);
+      document.querySelector("#continue-windowed").addEventListener("click", () => videoFullscreenPrompt.hidden = true);
+      document.querySelector("#restore-fullscreen").addEventListener("click", enterPresentationFullscreen);
+      document.querySelector("#resume-windowed").addEventListener("click", () => {
+        resumePromptDismissed = true;
+        resumeFullscreenPrompt.hidden = true;
+      });
+
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile) {
+        container.className = "unity-mobile";
+        canvas.className = "unity-mobile";
+      } else {
+        canvas.style.width = "960px";
+        canvas.style.height = "600px";
+      }
+
+      const buildUrl = "Build";
+      const config = {
+        dataUrl: buildUrl + "/WebGLRelease-20261103-213304-74f10206.data.unityweb",
+        frameworkUrl: buildUrl + "/WebGLRelease-20261103-213304-74f10206.framework.js.unityweb",
+        codeUrl: buildUrl + "/WebGLRelease-20261103-213304-74f10206.wasm.unityweb",
+        streamingAssetsUrl: "StreamingAssets",
+        companyName: "happychappy",
+        productName: "HALEON",
+        productVersion: "1.2",
+        showBanner: unityShowBanner
+      };
+
+      loadingBar.style.display = "block";
+      const script = document.createElement("script");
+      script.src = buildUrl + "/WebGLRelease-20261103-213304-74f10206.loader.js";
+      script.onload = () => createUnityInstance(canvas, config, progress => {
+        progressBarFull.style.width = (100 * progress) + "%";
+      }).then(() => loadingBar.style.display = "none").catch(message => alert(message));
+      document.body.appendChild(script);
+    </script>
+  </body>
+</html>

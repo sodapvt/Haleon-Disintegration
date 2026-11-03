@@ -24,7 +24,7 @@ public static class WebGLPresentation
 
     /// <summary>
     /// Requests fullscreen directly from a Unity button tap. Calling this from
-    /// the form Submit button satisfies the browser's user-gesture requirement.
+    /// the welcome prompt's OK button satisfies the browser's user-gesture requirement.
     /// </summary>
     public static void EnterFullscreenFromUserGesture()
     {

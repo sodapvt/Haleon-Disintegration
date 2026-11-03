@@ -48,10 +48,6 @@ public class GoogleSheetUploader : MonoBehaviour
             return;
         }
 
-        // This call is made directly from the Submit button's click event,
-        // which is the moment browsers permit a WebGL page to enter fullscreen.
-        WebGLPresentation.EnterFullscreenFromUserGesture();
-
         // Test entries are allowed to continue through the app without sending any
         // personal data to the Google Sheet. Comparison is case-insensitive so the
         // operator can enter "test user" naturally.

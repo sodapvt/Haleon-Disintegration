@@ -39,9 +39,11 @@
 
       async function enterPresentationFullscreen() {
         try {
-          const requestFullscreen = canvas.requestFullscreen || canvas.webkitRequestFullscreen;
+          // Include browser form fields and presentation overlays in fullscreen.
+          const fullscreenRoot = document.documentElement;
+          const requestFullscreen = fullscreenRoot.requestFullscreen || fullscreenRoot.webkitRequestFullscreen;
           if (!document.fullscreenElement && !document.webkitFullscreenElement && requestFullscreen) {
-            await requestFullscreen.call(canvas);
+            await requestFullscreen.call(fullscreenRoot);
           }
           if (screen.orientation && screen.orientation.lock) await screen.orientation.lock("landscape");
         } catch (_) {
