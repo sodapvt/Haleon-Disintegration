@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEngine.Networking;
 using System.Collections;
 using System.Collections.Generic;
-using TMPro;
 using UnityEngine.SceneManagement;
 using System;
 
@@ -10,9 +9,15 @@ public class GoogleSheetUploader : MonoBehaviour
 {
      [SerializeField] private string googleSheetURL = "YOUR_SHEET_URL_HERE";
     [SerializeField] private string googleFormURL = "YOUR_WEB_APP_URL_HERE";
-    private Queue<HCPRecord> retryQueue = new Queue<HCPRecord>();
+    private readonly Queue<PendingUpload> retryQueue = new Queue<PendingUpload>();
     private bool isUploading = false;
-    private string currentSubmissionId = string.Empty;
+    private FormHandler submittedForm;
+
+    private class PendingUpload
+    {
+        public HCPRecord data;
+        public bool firstAttemptCompleted;
+    }
     public static GoogleSheetUploader instance;
     void Awake()
     {
@@ -25,15 +30,21 @@ public class GoogleSheetUploader : MonoBehaviour
         instance = this;
         DontDestroyOnLoad(gameObject);
 
-        if (FormHandler.instance.loadingIndicator != null)
+        if (FormHandler.instance != null && FormHandler.instance.loadingIndicator != null)
             FormHandler.instance.loadingIndicator.SetActive(false);
     }
 
     public void OnSubmit()
     {
-        FormHandler.instance.audioSource.Play();
-        FormHandler.instance.androidHaptics.Vibrate();
-        HCPUIController form = FormHandler.instance.hcpUIController;
+        FormHandler handler = FormHandler.instance;
+        if (handler == null || submittedForm == handler)
+            return;
+
+        if (handler.audioSource != null)
+            handler.audioSource.Play();
+        if (handler.androidHaptics != null)
+            handler.androidHaptics.Vibrate();
+        HCPUIController form = handler.hcpUIController;
         if (form == null)
         {
             AndroidToaster.ShowToast("The form is not available.");
@@ -53,84 +64,45 @@ public class GoogleSheetUploader : MonoBehaviour
         // operator can enter "test user" naturally.
         if (string.Equals(data.eseName, "Test User", StringComparison.OrdinalIgnoreCase))
         {
-            currentSubmissionId = string.Empty;
+            submittedForm = handler;
             AndroidToaster.ShowToast("Test form accepted. Upload skipped.");
             LoadGameScene();
             return;
         }
 
         data.submissionId = Guid.NewGuid().ToString("N");
-        currentSubmissionId = data.submissionId;
+        submittedForm = handler;
+        if (handler.submitButton != null)
+            handler.submitButton.interactable = false;
 
         AndroidToaster.ShowToast("Data saved. Uploading...");
         Debug.Log("Data saved. Uploading...");
 
-        retryQueue.Enqueue(data);
-        StartCoroutine(PostToGoogleWithTimeout(data, 10f));
+        PendingUpload pending = new PendingUpload { data = data };
+        retryQueue.Enqueue(pending);
+        TryUploadNext();
+        StartCoroutine(ContinueAfterFirstAttempt(pending, handler));
     }
 
-    IEnumerator PostToGoogleWithTimeout(HCPRecord data, float maxWaitTime)
+    private IEnumerator ContinueAfterFirstAttempt(PendingUpload pending, FormHandler handler)
     {
-         FormHandler.instance.loadingIndicator.SetActive(true);
-        isUploading = true;
+        if (handler != null && handler.loadingIndicator != null)
+            handler.loadingIndicator.SetActive(true);
 
-        if (Application.internetReachability == NetworkReachability.NotReachable)
+        while (!pending.firstAttemptCompleted)
+            yield return null;
+
+        if (handler != null && handler == FormHandler.instance)
         {
-            AndroidToaster.ShowToast("No internet. Will retry...");
-            yield return new WaitForSeconds(10);
-            isUploading = false;
-            TryUploadNext();
+            if (handler.loadingIndicator != null)
+                handler.loadingIndicator.SetActive(false);
             LoadGameScene();
-            yield break;
         }
-
-        AndroidToaster.ShowToast("Preparing to submit...");
-        string jsonData = JsonUtility.ToJson(data);
-        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
-
-        using (UnityWebRequest request = new UnityWebRequest(googleFormURL, "POST"))
-        {
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = (int)maxWaitTime;
-
-            float elapsedTime = 0f;
-            var operation = request.SendWebRequest();
-
-            while (!operation.isDone && elapsedTime < maxWaitTime)
-            {
-                elapsedTime += Time.deltaTime;
-                yield return null;
-            }
-
-            if (ServerAccepted(request))
-            {
-                Debug.Log("Submitted successfully!");
-                AndroidToaster.ShowToast("Submitted successfully!");
-                retryQueue.Dequeue();
-            }
-            else
-            {
-                RegenerateDuplicateSubmissionIdIfNeeded(
-                    data,
-                    request.downloadHandler.text);
-                Debug.LogWarning(
-                    "Submission failed: " +
-                    GetRequestError(request));
-                AndroidToaster.ShowToast("Upload will retry in background.");
-                yield return new WaitForSeconds(5);
-            }
-        }
-
-        isUploading = false;
-        TryUploadNext();
-        LoadGameScene();
     }
 
     private void LoadGameScene()
     {
-        if (SceneManager.GetActiveScene().name != "LaunchScene")
+        if (SceneManager.GetActiveScene().name != "LauncherScene")
         {
             SceneManager.LoadScene("LauncherScene");
         }
@@ -151,52 +123,83 @@ public class GoogleSheetUploader : MonoBehaviour
     {
         if (!isUploading && retryQueue.Count > 0)
         {
-            StartCoroutine(PostToGoogle(retryQueue.Peek()));
+            // Set the guard before starting the coroutine so all submissions share
+            // one worker, including new forms submitted while an older one retries.
+            isUploading = true;
+            StartCoroutine(ProcessUploadQueue());
         }
     }
 
-    IEnumerator PostToGoogle(HCPRecord data)
+    private IEnumerator ProcessUploadQueue()
     {
-        isUploading = true;
-
-        if (Application.internetReachability == NetworkReachability.NotReachable)
+        try
         {
-            AndroidToaster.ShowToast("No internet. Will retry...");
-            yield return new WaitForSeconds(10);
+            while (retryQueue.Count > 0)
+            {
+                PendingUpload pending = retryQueue.Peek();
+                if (Application.internetReachability == NetworkReachability.NotReachable)
+                {
+                    AndroidToaster.ShowToast("No internet. Will retry...");
+                    pending.firstAttemptCompleted = true;
+                    yield return new WaitForSecondsRealtime(10);
+                    continue;
+                }
+
+                bool accepted;
+                using (UnityWebRequest request = CreateUploadRequest(pending.data, 30))
+                {
+                    // Await completion or the request's own timeout. A local timer
+                    // cannot tell whether the server has already saved the row.
+                    yield return request.SendWebRequest();
+                    accepted = ServerAccepted(request);
+                    if (!accepted)
+                        Debug.LogWarning("Submission failed: " + GetRequestError(request));
+                }
+
+                pending.firstAttemptCompleted = true;
+                if (accepted)
+                {
+                    retryQueue.Dequeue();
+                    AndroidToaster.ShowToast("Submitted successfully!");
+                }
+                else
+                {
+                    // Keep the same ID even after a timeout: the original POST may
+                    // have saved successfully while its response was lost.
+                    AndroidToaster.ShowToast("Upload will retry in background.");
+                    yield return new WaitForSecondsRealtime(5);
+                }
+            }
+        }
+        finally
+        {
             isUploading = false;
-            TryUploadNext();
-            yield break;
         }
+    }
 
-        string jsonData = JsonUtility.ToJson(data);
-        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(jsonData);
+    private UnityWebRequest CreateUploadRequest(HCPRecord data, int timeoutSeconds)
+    {
+        byte[] bodyRaw = System.Text.Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
+        UnityWebRequest request = new UnityWebRequest(googleFormURL, "POST");
+        request.uploadHandler = new UploadHandlerRaw(bodyRaw);
+        request.downloadHandler = new DownloadHandlerBuffer();
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Apps Script parses the JSON body regardless of its MIME type. text/plain
+        // avoids the browser's OPTIONS preflight, which Apps Script cannot serve.
+        request.SetRequestHeader("Content-Type", "text/plain;charset=UTF-8");
+#else
+        request.SetRequestHeader("Content-Type", "application/json");
+#endif
+        request.timeout = timeoutSeconds;
+        return request;
+    }
 
-        using (UnityWebRequest request = new UnityWebRequest(googleFormURL, "POST"))
-        {
-            request.uploadHandler = new UploadHandlerRaw(bodyRaw);
-            request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json");
-            request.timeout = 10;
-
-            yield return request.SendWebRequest();
-
-            if (ServerAccepted(request))
-            {
-                AndroidToaster.ShowToast("Submitted successfully!");
-                retryQueue.Dequeue();
-            }
-            else
-            {
-                RegenerateDuplicateSubmissionIdIfNeeded(
-                    data,
-                    request.downloadHandler.text);
-                AndroidToaster.ShowToast("Failed. Will retry in background.");
-                yield return new WaitForSeconds(5);
-            }
-        }
-
-        isUploading = false;
-        TryUploadNext();
+    [Serializable]
+    private class UploadResponse
+    {
+        public bool ok = false;
+        public bool success = false;
+        public string error = null;
     }
 
     private static bool ServerAccepted(UnityWebRequest request)
@@ -205,26 +208,20 @@ public class GoogleSheetUploader : MonoBehaviour
             request.downloadHandler == null)
             return false;
 
-        string response = request.downloadHandler.text ?? string.Empty;
-        return response.Contains("\"ok\":true") ||
-               response.Contains("\"success\":true");
-    }
-
-    private void RegenerateDuplicateSubmissionIdIfNeeded(
-        HCPRecord data,
-        string response)
-    {
-        if (data == null ||
-            string.IsNullOrEmpty(response) ||
-            response.IndexOf(
-                "Duplicate Submission ID",
-                StringComparison.OrdinalIgnoreCase) < 0)
-            return;
-
-        data.submissionId = Guid.NewGuid().ToString("N");
-        currentSubmissionId = data.submissionId;
-        Debug.LogWarning(
-            "A duplicate submission ID was rejected. Generated a new ID.");
+        try
+        {
+            UploadResponse response = JsonUtility.FromJson<UploadResponse>(
+                request.downloadHandler.text);
+            // The server explicitly rejecting this ID as a duplicate confirms it
+            // already has the submission. Stop retrying rather than create a new ID.
+            return response != null && (response.ok || response.success ||
+                (!string.IsNullOrEmpty(response.error) && response.error.Trim().StartsWith(
+                    "Duplicate Submission ID", StringComparison.OrdinalIgnoreCase)));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static string GetRequestError(UnityWebRequest request)
